@@ -1,86 +1,89 @@
 import { Container, Navbar, Button } from "react-bootstrap";
-
 import "bootstrap/dist/css/bootstrap.min.css";
 import { useState, useEffect } from "react";
+import axios from "axios";
 import AddMedicineForm from "./components/AddMedicineForm";
 import MedicineList from "./components/MedicineList";
 import Cart from "./components/Cart";
+
+const MEDICINES_ENDPOINT = "https://crudcrud.com/api/8aa19cd555cd4c41adfc3230da8b6c50/medicines";
+const CART_ITEMS_ENDPOINT = "Yhttps://crudcrud.com/api/8aa19cd555cd4c41adfc3230da8b6c50/cartItems";
 
 function App() {
   const [medicines, setMedicines] = useState([]);
   const [cartItems, setCartItems] = useState([]);
   const [isCartVisible, setIsCartVisible] = useState(false);
 
+
   useEffect(() => {
-    const loadedMedicines = localStorage.getItem("medicines");
-    const loadedCartItems = localStorage.getItem("cartItems");
-    if (loadedMedicines) {
-      setMedicines(JSON.parse(loadedMedicines));
-    }
-    if (loadedCartItems) {
-      setCartItems(JSON.parse(loadedCartItems));
-    }
+    axios.get(MEDICINES_ENDPOINT)
+      .then((response) => setMedicines(response.data))
+      .catch((error) => console.error("Failed to fetch medicines: ", error));
+
+    axios.get(CART_ITEMS_ENDPOINT)
+      .then((response) => setCartItems(response.data))
+      .catch((error) => console.error("Failed to fetch cart items: ", error));
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem("medicines", JSON.stringify(medicines));
-  }, [medicines]);
-
-  useEffect(() => {
-    localStorage.setItem("cartItems", JSON.stringify(cartItems));
-  }, [cartItems]);
-
   const handleAddMedicine = (medicine) => {
-    setMedicines([
-      ...medicines,
-      { ...medicine, quantity: parseInt(medicine.quantity) },
-    ]);
+    axios.post(MEDICINES_ENDPOINT, medicine)
+      .then((response) => {
+        setMedicines([...medicines, response.data]);
+      })
+      .catch((error) => console.error("Failed to add medicine: ", error));
   };
 
-  const handleAddToCart = (index) => {
-    const newMedicines = [...medicines];
-    const item = newMedicines[index];
-    item.quantity -= 1;
+  const handleAddToCart = (medicineId) => {
+    const medicine = medicines.find(med => med._id === medicineId);
+    if (medicine && medicine.quantity > 0) {
+      const updatedMedicines = medicines.map(med =>
+        med._id === medicineId ? { ...med, quantity: med.quantity - 1 } : med
+      );
+      setMedicines(updatedMedicines);
+      axios.put(`${MEDICINES_ENDPOINT}/${medicineId}`, { ...medicine, quantity: medicine.quantity - 1 });
 
-    const cartIndex = cartItems.findIndex(
-      (cartItem) => cartItem.name === item.name
-    );
-    if (cartIndex > -1) {
-      const newCartItems = [...cartItems];
-      newCartItems[cartIndex].cartQuantity += 1;
-      setCartItems(newCartItems);
+      const existingCartItemIndex = cartItems.findIndex(item => item.name === medicine.name);
+      if (existingCartItemIndex > -1) {
+        const updatedCartItems = cartItems.map((item, index) =>
+          index === existingCartItemIndex ? { ...item, cartQuantity: item.cartQuantity + 1 } : item
+        );
+        setCartItems(updatedCartItems);
+        axios.put(`${CART_ITEMS_ENDPOINT}/${updatedCartItems[existingCartItemIndex]._id}`, updatedCartItems[existingCartItemIndex]);
+      } else {
+        const newItem = { ...medicine, cartQuantity: 1 };
+        axios.post(CART_ITEMS_ENDPOINT, newItem).then((response) => {
+          setCartItems([...cartItems, response.data]);
+        });
+      }
     } else {
-      setCartItems([...cartItems, { ...item, cartQuantity: 1 }]);
+      alert("This medicine is out of stock.");
     }
-
-    setMedicines(newMedicines);
   };
 
-  const onRemoveFromCart = (index) => {
-    const item = cartItems[index];
+  const onRemoveFromCart = (cartItemId) => {
+    const cartItem = cartItems.find(item => item._id === cartItemId);
+    if (!cartItem) return;
 
-    if (item.cartQuantity < 2) {
-      const updatedCart = cartItems.filter(
-        (cartItem) => cartItem.name !== item.name
+    if (cartItem.cartQuantity > 1) {
+      const updatedCartItems = cartItems.map(item =>
+        item._id === cartItemId ? { ...item, cartQuantity: item.cartQuantity - 1 } : item
       );
-
-      setCartItems(updatedCart);
+      setCartItems(updatedCartItems);
+      axios.put(`${CART_ITEMS_ENDPOINT}/${cartItemId}`, { ...cartItem, cartQuantity: cartItem.cartQuantity - 1 });
     } else {
-      const updateCart = cartItems.map((cartItem) =>
-        cartItem.name === item.name
-          ? { ...cartItem, cartQuantity: --cartItem.cartQuantity }
-          : cartItem
-      );
-      setCartItems(updateCart);
+      const updatedCartItems = cartItems.filter(item => item._id !== cartItemId);
+      setCartItems(updatedCartItems);
+      axios.delete(`${CART_ITEMS_ENDPOINT}/${cartItemId}`);
     }
 
-    const updatedMedicines = medicines.map((medicine) =>
-      medicine.name === item.name
-        ? { ...medicine, quantity: ++medicine.quantity }
-        : medicine
-    );
-
-    setMedicines(updatedMedicines);
+    const medicineIndex = medicines.findIndex(med => med.name === cartItem.name);
+    if (medicineIndex > -1) {
+      const updatedMedicines = medicines.map((med, index) =>
+        index === medicineIndex ? { ...med, quantity: med.quantity + 1 } : med
+      );
+      setMedicines(updatedMedicines);
+      axios.put(`${MEDICINES_ENDPOINT}/${medicines[medicineIndex]._id}`, updatedMedicines[medicineIndex]);
+    }
   };
 
   return (
@@ -88,10 +91,7 @@ function App() {
       <Navbar bg="light" expand="lg" className="justify-content-between">
         <Container>
           <Navbar.Brand href="#home">Medicine Shop Admin</Navbar.Brand>
-          <Button
-            variant="outline-success"
-            onClick={() => setIsCartVisible(true)}
-          >
+          <Button variant="outline-success" onClick={() => setIsCartVisible(true)}>
             View Cart
           </Button>
         </Container>
